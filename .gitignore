@@ -1,0 +1,16 @@
+# 构建产物
+dist/
+downloads/
+sea-config.json
+
+# 依赖
+node_modules/
+
+# 备份与日志
+*.bak
+*.bak-*
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db

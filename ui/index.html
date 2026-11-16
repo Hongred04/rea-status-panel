@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REA 状态面板</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f46e5'/><text x='16' y='23' font-size='20' font-family='sans-serif' font-weight='bold' fill='white' text-anchor='middle'>R</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <div class="logo">R</div>
+      <div class="brand-text">
+        <h1>REA 状态面板</h1>
+        <p class="sub">Reverse Engineer Anything · 本地运行状态与版本更新</p>
+      </div>
+    </div>
+    <div class="overall" id="overall" data-level="pending">
+      <span class="dot"></span>
+      <span id="overallText">检查中…</span>
+    </div>
+  </header>
+
+  <!-- 版本与更新 -->
+  <section class="card release">
+    <div class="card-head">
+      <h2>版本与更新</h2>
+      <span class="pill" id="releasePill" data-level="pending">检查中</span>
+    </div>
+
+    <div class="versions">
+      <div class="vbox">
+        <div class="vlabel">当前安装</div>
+        <div class="vnum" id="vCurrent">—</div>
+        <div class="vmeta" id="vCurrentMeta">读取中…</div>
+      </div>
+      <div class="varrow" id="vArrow">→</div>
+      <div class="vbox">
+        <div class="vlabel">上游最新</div>
+        <div class="vnum" id="vLatest">—</div>
+        <div class="vmeta" id="vLatestMeta">查询中…</div>
+      </div>
+    </div>
+
+    <div class="release-foot">
+      <a id="vLink" class="link" href="https://github.com/morluto/rea/releases" target="_blank" rel="noreferrer">查看 Release 记录 →</a>
+      <span class="foot-note" id="vSource"></span>
+    </div>
+    <div class="warn-line" id="vWarn" hidden></div>
+    <div id="releaseFix"></div>
+  </section>
+
+  <div class="grid">
+
+    <!-- 命令行 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>命令行</h2>
+        <span class="pill" id="cliPill" data-level="pending">读取中</span>
+      </div>
+      <div class="card-body" id="cliBody"></div>
+    </section>
+
+    <!-- WorkBuddy 接入 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>WorkBuddy 接入</h2>
+        <span class="pill" id="mcpPill" data-level="pending">读取中</span>
+      </div>
+      <div class="card-body" id="mcpBody"></div>
+    </section>
+
+    <!-- DeepSeek Harness -->
+    <section class="card">
+      <div class="card-head">
+        <h2>DeepSeek Harness</h2>
+        <span class="pill" id="dshPill" data-level="pending">读取中</span>
+      </div>
+      <div class="card-body" id="dshBody"></div>
+    </section>
+
+    <!-- 运行环境 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>运行环境</h2>
+        <span class="pill" id="nodePill" data-level="pending">读取中</span>
+      </div>
+      <div class="card-body" id="nodeBody"></div>
+    </section>
+
+    <!-- 分析引擎 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>深度分析引擎</h2>
+        <span class="pill" id="enginePill" data-level="pending">检查中</span>
+      </div>
+      <div class="card-body" id="engineBody"></div>
+    </section>
+
+    <!-- 技能包 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>技能包</h2>
+        <span class="pill" id="skillPill" data-level="pending">读取中</span>
+      </div>
+      <div class="card-body" id="skillBody"></div>
+    </section>
+
+    <!-- 能力范围 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>当前能力范围</h2>
+        <span class="pill" id="scopePill" data-level="pending">待判定</span>
+      </div>
+      <div class="card-body" id="scopeBody"></div>
+    </section>
+
+  </div>
+
+  <footer class="foot">
+    <button id="refresh" class="btn">重新检查</button>
+    <span class="stamp" id="stamp"></span>
+  </footer>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
