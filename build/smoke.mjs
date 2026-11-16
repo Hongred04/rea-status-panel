@@ -82,15 +82,34 @@ try {
   check('服务在 20 秒内就绪', ready);
   if (!ready) throw new Error('服务未就绪');
 
+  // CI runner 上通常没有装 rea-agents，此时只能验证结构与安全约束。
+  // 本地开发机默认 strict，要求真实的版本信息。
+  const strict = process.env.SMOKE_STRICT !== '0';
+
   const status = await (await fetch(BASE + '/api/status')).json();
-  check('/api/status 返回版本', Boolean(status.cli && status.cli.version), 'cli=' + (status.cli && status.cli.version));
+  if (strict) {
+    check(
+      '/api/status 返回版本',
+      Boolean(status.cli && status.cli.version),
+      'cli=' + (status.cli && status.cli.version),
+    );
+  } else {
+    check(
+      '/api/status 结构完整',
+      Boolean(status.cli && status.mcp && status.node && status.skill),
+    );
+  }
   check('/api/status 含 DSH 字段', Boolean(status.dsh), 'detected=' + (status.dsh && status.dsh.detected));
 
   const doctor = await (await fetch(BASE + '/api/doctor')).json();
   check('/api/doctor 可解析', typeof doctor.ok === 'boolean');
 
   const release = await (await fetch(BASE + '/api/release')).json();
-  check('/api/release 有当前版本', Boolean(release.current), 'current=' + release.current);
+  if (strict) {
+    check('/api/release 有当前版本', Boolean(release.current), 'current=' + release.current);
+  } else {
+    check('/api/release 可解析', 'updateAvailable' in release, 'latest=' + release.latest);
+  }
 
   const html = await (await fetch(BASE + '/')).text();
   check('首页返回 HTML', html.includes('REA 状态面板'));

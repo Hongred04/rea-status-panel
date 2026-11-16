@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 语法检查
+        shell: bash
+        run: |
+          node --check server.cjs
+          node -e "new Function(require('fs').readFileSync('ui/app.js','utf8'))"
+
+      - name: 构建单文件 exe
+        shell: bash
+        timeout-minutes: 10
+        run: node build/build-exe.mjs
+
+      - name: 冒烟测试
+        shell: bash
+        env:
+          # runner 上没有 rea-agents，退化为结构断言
+          SMOKE_STRICT: '0'
+        run: node build/smoke.mjs
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: REA-Panel-exe
+          path: dist/REA-Panel.exe
+          retention-days: 7

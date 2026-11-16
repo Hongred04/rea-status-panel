@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（如 v1.0.1）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 构建单文件 exe
+        shell: bash
+        timeout-minutes: 10
+        run: node build/build-exe.mjs
+
+      - name: 冒烟测试
+        shell: bash
+        env:
+          SMOKE_STRICT: '0'
+        run: node build/smoke.mjs
+
+      - name: 发布到 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -e
+          echo "发布 tag: $TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release 已存在，覆盖上传资产"
+            gh release upload "$TAG" "dist/REA-Panel.exe#REA-Panel.exe" --clobber
+          else
+            gh release create "$TAG" "dist/REA-Panel.exe#REA-Panel.exe" \
+              --title "$TAG" \
+              --notes "Single-file Windows x64 build. Bundles its own Node runtime; no Node.js required on the target machine.
+
+          Requires \`rea-agents\` to be installed.
+
+          - Unsigned binary; SmartScreen may prompt on first run.
+          - Closing the app window stops the background service."
+          fi
