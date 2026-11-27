@@ -511,6 +511,135 @@ function renderRelease(r) {
   }
 }
 
+/* ---------------- 客户端接入总览 ---------------- */
+
+function renderClients(data) {
+  const body = $('clientsBody');
+  clear(body);
+
+  if (!data || !data.available) {
+    setPill($('clientsPill'), 'pending', '不可用');
+    row(body, '原因', (data && data.reason) || '未知');
+    return;
+  }
+
+  const cs = data.clients || [];
+  const configured = cs.filter((c) => c.configured);
+  const detected = cs.filter((c) => c.detected && !c.configured);
+  const missing = cs.filter((c) => !c.detected);
+
+  setPill($('clientsPill'), 'ok', configured.length + ' 已接入 / ' + cs.length + ' 受支持');
+
+  // 排序：已接入 → 待接入 → 未安装
+  const ordered = [...configured, ...detected, ...missing];
+
+  const wrap = el('div', 'client-list');
+  for (const c of ordered) {
+    const rowEl = el('div', 'client-row');
+
+    const nameWrap = el('span', 'client-name-wrap');
+    nameWrap.appendChild(el('span', 'client-name', c.displayName));
+    nameWrap.appendChild(el('span', 'client-id mono muted', c.name));
+    rowEl.appendChild(nameWrap);
+
+    const right = el('span', 'client-state');
+
+    if (c.configured) {
+      right.appendChild(el('span', 'tag tag-ok', '已接入'));
+    } else if (c.manual) {
+      right.appendChild(el('span', 'tag', '需手动配置'));
+    } else if (c.detected) {
+      right.appendChild(el('span', 'tag tag-warn', '待接入'));
+      const btn = el('button', 'btn-ghost btn-small', '接入');
+      btn.type = 'button';
+      btn.addEventListener('click', () => startClientSetup(c.name, btn));
+      right.appendChild(btn);
+    } else {
+      right.appendChild(el('span', 'tag tag-muted', '未安装'));
+    }
+
+    rowEl.appendChild(right);
+    wrap.appendChild(rowEl);
+  }
+  body.appendChild(wrap);
+
+  const meta = el('div', 'foot-note');
+  meta.style.marginTop = '8px';
+  meta.textContent =
+    '接入动作由 REA 官方 setup 执行（写配置前自行备份）。检查时间 ' +
+    new Date(data.checkedAt).toLocaleTimeString('zh-CN', { hour12: false });
+  body.appendChild(meta);
+
+  const log = el('pre', 'update-log');
+  log.id = 'setupLog';
+  log.hidden = true;
+  body.appendChild(log);
+}
+
+async function startClientSetup(name, btn) {
+  const ok = window.confirm(
+    '将对 ' + name + ' 执行：rea setup --client ' + name + ' --yes\n\n' +
+    'REA 会写入该客户端的 MCP 配置（涉及退出类客户端时会提示先关闭）。\n继续吗？',
+  );
+  if (!ok) return;
+
+  btn.disabled = true;
+  btn.textContent = '接入中…';
+
+  try {
+    const res = await fetch('/api/setup-client?client=' + encodeURIComponent(name), {
+      method: 'POST',
+    });
+    const j = await res.json();
+    if (!j.started) {
+      btn.textContent = j.detail || j.error || '无法开始';
+      btn.disabled = false;
+      return;
+    }
+    pollSetup();
+  } catch (e) {
+    btn.textContent = '请求失败';
+    btn.disabled = false;
+  }
+}
+
+async function pollSetup() {
+  const log = $('setupLog');
+  try {
+    const res = await fetch('/api/setup-client');
+    const j = await res.json();
+
+    if (log) {
+      log.hidden = false;
+      log.textContent = j.log && j.log.length ? j.log.join('\n') : '等待输出…';
+      log.scrollTop = log.scrollHeight;
+    }
+
+    if (j.running) {
+      setTimeout(pollSetup, 1000);
+      return;
+    }
+
+    if (log) {
+      log.textContent += '\n\n' + (j.ok ? '✓ setup 完成' : '✗ 未成功（退出码 ' + j.exitCode + '）');
+    }
+    setTimeout(() => load(true), 1500);
+  } catch {
+    setTimeout(pollSetup, 2000);
+  }
+}
+
+/** 页面刷新时若接入任务仍在跑，恢复轮询。 */
+async function restoreSetupState() {
+  try {
+    const res = await fetch('/api/setup-client');
+    const j = await res.json();
+    if (j.running) pollSetup();
+  } catch {
+    /* 忽略 */
+  }
+}
+
 /* ---------------- 一键修复接入 ---------------- */
 
 function appendRepairButton(parent, label) {
@@ -725,18 +854,28 @@ async function load(force) {
       renderRelease({ current: null, latest: null, warnings: ['更新检查请求失败'] });
     });
 
+  const clientsP = fetch('/api/clients' + q)
+    .then((res) => res.json())
+    .then((c) => {
+      renderClients(c);
+    })
+    .catch(() => {
+      renderClients(null);
+    });
+
   try {
     await statusP;
   } catch (e) {
     renderFatal('无法连接到本地服务：' + (e && e.message ? e.message : e));
   }
 
-  await Promise.allSettled([doctorP, releaseP]);
+  await Promise.allSettled([doctorP, releaseP, clientsP]);
 
   $('stamp').textContent = '最近检查 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
   btn.disabled = false;
 
   restoreUpdateState();
+  restoreSetupState();
 }
 
 $('refresh').addEventListener('click', () => load(true));

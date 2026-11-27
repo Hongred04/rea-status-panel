@@ -894,6 +894,182 @@ function startDshRepair() {
 }
 
 /* ------------------------------------------------------------------ */
+/* 客户端总览与一键接入                                                 */
+/* ------------------------------------------------------------------ */
+
+let clientsCache = { at: 0, data: null };
+let clientsInFlight = null;
+
+/**
+ * 用 `rea setup --all-detected --dry-run` 拿全部客户端的检测/接入状态。
+ * 这是 REA 官方的检测逻辑，比自己在面板里维护各客户端的 marker 路径可靠。
+ * 60s 缓存 + in-flight 去重（setup dry-run 需要读几十个配置文件，约数秒）。
+ */
+async function collectClients(force) {
+  if (!force && clientsCache.data && Date.now() - clientsCache.at < 60000) {
+    return Object.assign({}, clientsCache.data, { cached: true });
+  }
+  if (clientsInFlight) return clientsInFlight;
+
+  clientsInFlight = (async () => {
+    const rea = findRea();
+    if (!rea) {
+      return { available: false, reason: '未找到 REA', clients: [], checkedAt: new Date().toISOString() };
+    }
+    try {
+      const run = await runRea(
+        rea,
+        ['setup', '--all-detected', '--dry-run', '--format', 'json'],
+        60000,
+      );
+      const raw = run.stdout || '';
+      const start = raw.indexOf('{');
+      const end = raw.lastIndexOf('}');
+      if (start < 0 || end <= start) throw new Error('REA 输出中没有 JSON');
+      const parsed = JSON.parse(raw.slice(start, end + 1));
+
+      const clients = (parsed.clientStates || []).map((c) => ({
+        name: c.client.name,
+        displayName: c.client.displayName,
+        configPath: c.client.configPath || null,
+        format: c.client.format || null,
+        detected: Boolean(c.detected),
+        configured: Boolean(c.configured),
+        status: c.status,
+        // REA 明确不支持自动写入的客户端（如 Grok Bot），只能手动配置
+        manual: Boolean(
+          c.client.registrationProfile &&
+          c.client.registrationProfile.connection &&
+          c.client.registrationProfile.connection.kind === 'unavailable',
+        ),
+      }));
+
+      const data = { available: true, clients, checkedAt: new Date().toISOString() };
+      clientsCache = { at: Date.now(), data };
+      return data;
+    } catch (e) {
+      return {
+        available: false,
+        reason: e && e.message ? e.message : String(e),
+        clients: [],
+        checkedAt: new Date().toISOString(),
+      };
+    }
+  })();
+
+  const out = await clientsInFlight;
+  clientsInFlight = null;
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* 一键接入（rea setup --client）                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 白名单来自 REA 的 SupportedClients，防止把任意参数拼进命令行。
+ */
+const SETUP_CLIENT_WHITELIST = new Set([
+  'claude_code', 'claude_desktop', 'codex', 'cursor', 'gemini_cli', 'windsurf',
+  'devin', 'opencode', 'antigravity', 'copilot_cli', 'commandcode', 'qwen_code',
+  'kimi', 'vscode', 'trae', 'workbuddy', 'grok_build', 'omp', 'pi', 'hermes',
+  'qoder', 'droid', 'zcode', 'dsh', 'freebuff', 'grok_bot', 'codebuddy', 'lm_studio',
+]);
+
+let setupJob = {
+  running: false,
+  client: null,
+  startedAt: null,
+  finishedAt: null,
+  ok: null,
+  exitCode: null,
+  log: [],
+};
+
+function pushSetupLog(text) {
+  for (const line of String(text).split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    setupJob.log.push(t.slice(0, 400));
+  }
+  if (setupJob.log.length > 120) setupJob.log.splice(0, setupJob.log.length - 120);
+}
+
+const SETUP_TIMEOUT_MS = 3 * 60 * 1000;
+
+function startSetupClient(clientName) {
+  if (!clientName || !SETUP_CLIENT_WHITELIST.has(clientName)) {
+    return { started: false, error: '不支持的客户端: ' + (clientName || '(空)' ) };
+  }
+  if (setupJob.running) {
+    return { started: false, detail: '已有接入任务在执行（' + setupJob.client + '）' };
+  }
+
+  const rea = findRea();
+  if (!rea) return { started: false, error: '未找到 REA 安装' };
+
+  setupJob = {
+    running: true,
+    client: clientName,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    ok: null,
+    exitCode: null,
+    log: [],
+  };
+
+  pushSetupLog('执行：rea setup --client ' + clientName + ' --yes');
+
+  let child;
+  try {
+    child = spawn(rea.exe, [...rea.scriptArgs, 'setup', '--client', clientName, '--yes'], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: Object.assign({}, process.env, { NO_COLOR: '1' }),
+    });
+  } catch (e) {
+    setupJob.running = false;
+    setupJob.ok = false;
+    pushSetupLog('启动失败：' + e.message);
+    return { started: false, error: e.message };
+  }
+
+  const timer = setTimeout(() => {
+    pushSetupLog('超过 3 分钟未完成，终止进程树');
+    try {
+      if (process.platform === 'win32' && child.pid) {
+        spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } else {
+        child.kill('SIGKILL');
+      }
+    } catch {
+      /* 进程可能已退出 */
+    }
+  }, SETUP_TIMEOUT_MS);
+
+  child.stdout.on('data', (d) => pushSetupLog(d.toString('utf8')));
+  child.stderr.on('data', (d) => pushSetupLog(d.toString('utf8')));
+  child.on('error', (e) => pushSetupLog('进程错误：' + e.message));
+
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    setupJob.running = false;
+    setupJob.finishedAt = new Date().toISOString();
+    setupJob.exitCode = code;
+    setupJob.ok = code === 0;
+
+    // 接入结果以重跑一次 dry-run 的状态为准（clientStates 才是权威）
+    pushSetupLog(code === 0 ? 'setup 进程正常结束' : 'setup 退出码 ' + code);
+    clientsCache = { at: 0, data: null };
+  });
+
+  return { started: true, client: clientName, detail: '接入任务已启动' };
+}
+
+/* ------------------------------------------------------------------ */
 /* 静态资源                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -1133,6 +1309,15 @@ function createServer() {
       if (url.pathname === '/api/repair-dsh') {
         if (req.method === 'POST') return sendJson(res, 200, startDshRepair());
         return sendJson(res, 200, dshRepairJob);
+      }
+      if (url.pathname === '/api/clients') {
+        return sendJson(res, 200, await collectClients(force));
+      }
+      if (url.pathname === '/api/setup-client') {
+        if (req.method === 'POST') {
+          return sendJson(res, 200, startSetupClient(url.searchParams.get('client')));
+        }
+        return sendJson(res, 200, setupJob);
       }
       if (url.pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'unknown endpoint' });
       return serveStatic(res, url.pathname);
